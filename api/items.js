@@ -1,77 +1,51 @@
 export default async function handler(req, res) {
-  const { userId, username } = req.query;
-
-  if (!userId && !username) {
-    return res.status(400).json({ error: "Missing userId or username" });
-  }
+  const { userId } = req.query;
+  if (!userId) return res.status(400).json({ error: "Missing userId" });
 
   try {
-    // If username is not provided, fetch it using the userId
-    let creatorName = username;
-    if (!creatorName) {
-      const userInfo = await fetch(`https://users.roblox.com/v1/users/${userId}`);
-      const userData = await userInfo.json();
-      creatorName = userData.name;
-    }
+    // Fetch user-created games
+    const gamesRes = await fetch(`https://games.roblox.com/v2/users/${userId}/games?sortOrder=Asc&limit=50`);
+    const gamesData = await gamesRes.json();
 
-    const SubCategories = ["2", "11", "12"]; // T-Shirt, Shirt, Pants
-    const allItems = [];
+    let gamepasses = [];
 
-    // Loop through clothing categories
-    for (const sub of SubCategories) {
-      let cursor = "";
-      do {
-        const url = `https://catalog.roproxy.com/v1/search/items/details?Category=3&Subcategory=${sub}&Sort=4&Limit=30&CreatorName=${creatorName}&cursor=${cursor}`;
-        const response = await fetch(url);
-        const data = await response.json();
-
-        if (data && data.data) {
-          for (const item of data.data) {
-            if (item.price && item.price > 0 && item.itemRestrictions.length === 0) {
-              allItems.push({
-                id: item.id,
-                name: item.name,
-                price: item.price,
-                type: "Clothing",
-              });
-            }
-          }
-        }
-
-        cursor = data.nextPageCursor || "";
-      } while (cursor);
-    }
-
-    // Also get Gamepasses
-    const gamesResponse = await fetch(`https://games.roblox.com/v2/users/${userId}/games?limit=10`);
-    const gamesData = await gamesResponse.json();
-
-    if (gamesData && gamesData.data) {
-      for (const game of gamesData.data) {
-        const passesResponse = await fetch(
-          `https://games.roblox.com/v1/games/${game.id}/game-passes?limit=50`
-        );
-        const passesData = await passesResponse.json();
-
-        if (passesData && passesData.data) {
-          for (const pass of passesData.data) {
-            if (pass.price && pass.price > 0) {
-              allItems.push({
-                id: pass.id,
-                name: pass.name,
-                price: pass.price,
-                type: "GamePass",
-              });
-            }
-          }
+    for (const game of gamesData.data) {
+      const passesRes = await fetch(`https://games.roblox.com/v1/games/${game.id}/game-passes?limit=100`);
+      const passesData = await passesRes.json();
+      if (passesData.data && passesData.data.length > 0) {
+        for (const pass of passesData.data) {
+          gamepasses.push({
+            name: pass.name,
+            id: pass.id,
+            price: pass.price || 0,
+            type: "Gamepass",
+          });
         }
       }
     }
 
-    console.log(`✅ Found ${allItems.length} items for ${creatorName}`);
+    // Fetch user-created clothing
+    const assetsRes = await fetch(`https://catalog.roblox.com/v1/search/items?creatorTargetId=${userId}&creatorType=User&limit=100`);
+    const assetsData = await assetsRes.json();
+
+    const clothing = assetsData.data
+      ?.filter(i => ["Shirt", "Pants", "T-Shirt"].includes(i.itemType))
+      .map(i => ({
+        name: i.name,
+        id: i.id,
+        price: i.price || 0,
+        type: i.itemType,
+      })) || [];
+
+    const allItems = [...gamepasses, ...clothing];
+
+    if (allItems.length === 0) {
+      return res.status(404).json({ error: "No items found" });
+    }
+
     res.status(200).json(allItems);
   } catch (err) {
-    console.error("❌ Error fetching items:", err);
-    res.status(500).json({ error: "Failed to fetch user items" });
+    console.error(err);
+    res.status(500).json({ error: "Failed to load items" });
   }
 }
