@@ -6,19 +6,49 @@ export default async function handler(req, res) {
   }
 
   try {
-    const [clothingRes, passesRes] = await Promise.all([
-      fetch(`https://catalog.roblox.com/v1/search/items?category=Clothing&creatorTargetId=${userId}&salesTypeFilter=1&limit=30`),
-      fetch(`https://games.roblox.com/v1/users/${userId}/game-passes?limit=30`)
-    ]);
+    // Fetch user's gamepasses
+    const passesResponse = await fetch(
+      `https://games.roblox.com/v1/users/${userId}/game-passes?limit=100`
+    );
+    const passesData = await passesResponse.json();
 
-    const clothing = await clothingRes.json();
-    const passes = await passesRes.json();
+    // Fetch user's clothing (shirts + pants)
+    const assetsResponse = await fetch(
+      `https://inventory.roblox.com/v2/users/${userId}/inventory/11?limit=100`
+    );
+    const assetsData = await assetsResponse.json();
 
-    res.status(200).json({
-      clothing: clothing.data || [],
-      passes: passes.data || []
-    });
+    // Combine both
+    const combinedItems = [];
+
+    // Add gamepasses
+    if (passesData && passesData.data) {
+      for (const item of passesData.data) {
+        combinedItems.push({
+          id: item.id,
+          name: item.name,
+          price: item.price || 0,
+          type: "GamePass",
+        });
+      }
+    }
+
+    // Add clothing
+    if (assetsData && assetsData.data) {
+      for (const item of assetsData.data) {
+        combinedItems.push({
+          id: item.assetId,
+          name: item.name,
+          price: item.price || 0,
+          type: "Clothing",
+        });
+      }
+    }
+
+    console.log(`✅ Found ${combinedItems.length} items for ${userId}`);
+    res.status(200).json(combinedItems);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("❌ Error fetching items:", err);
+    res.status(500).json({ error: "Failed to fetch user items" });
   }
 }
